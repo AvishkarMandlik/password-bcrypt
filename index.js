@@ -27,6 +27,27 @@ app.post('/signup', async (req, res) => {
   }
 });
 
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const usersCollection = mongoConnection.getCollection('users');
+
+  const user = await usersCollection.findOne({ username });
+  if (!user) {
+    return res.status(401).json({ message: 'Invalid username or password' });
+  }
+
+  try {
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ message: 'Invalid username or password' });
+    }
+
+    res.status(200).json({ message: 'Login successful' });
+  } catch (error) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 
 mongoConnection.connect()
   .then(() => {
