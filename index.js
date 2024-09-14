@@ -2,51 +2,62 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
 const mongoConnection = require('./mongoConn/mongoConn');
+const { check, validationResult } = require('express-validator');
 
 const app = express();
 const PORT = 3000;
 
 app.use(bodyParser.json());
 
-app.post('/signup', async (req, res) => {
-  const { username,email,phone, password, role } = req.body;
-  const usersCollection = mongoConnection.getCollection('users');
+// Helper function for input sanitization
+const sanitizeInput = (input) => {
+  return input.replace(/[^\w\s@.-]/gi, ''); // Allow alphanumeric, spaces, and common email characters
+};
 
-  const existingUser = await usersCollection.findOne({ username });
-  if (existingUser) {
-    return res.status(400).json({ message: 'Username already exists' });
-  }
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    await usersCollection.insertOne({ username,email,phone, role, password: hashedPassword });
-
-    res.status(201).json({ message: 'User created successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  const usersCollection = mongoConnection.getCollection('users');
-
-  const user = await usersCollection.findOne({ username });
-  if (!user) {
-    return res.status(401).json({ message: 'Invalid username or password' });
-  }
-
-  try {
-    const passwordMatch = await bcrypt.compare(password, user.password);
-    if (!passwordMatch) {
-      return res.status(401).json({ message: 'Invalid username or password' });
+// Signup API with validation and verification
+app.post('/signup',
+  // Validation checks
+  [
+    check('username').isLength({ min: 3 }).withMessage('Username must be at least 3 characters long'),
+    check('email').isEmail().withMessage('Invalid email address'),
+    check('phone').isMobilePhone().withMessage('Invalid phone number'),
+    check('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
+    check('role').isIn(['user', 'admin']).withMessage('Role must be either user or admin')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
-    res.status(200).json({ message: 'Login successful' });
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
+    let { username, email, phone, password, role } = req.body;
+    
+    // Sanitize inputs
+    username = sanitizeInput(username);
+    email = sanitizeInput(email);
+    phone = sanitizeInput(phone);
+
+    const usersCollection = mongoConnection.getCollection('users');
+
+    // Check if username, email, or phone already exists
+    const existingUser = await usersCollection.findOne({
+      $or: [{ username }, { email }, { phone }]
+    });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Username, email, or phone already exists' });
+    }
+
+    try {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await usersCollection.insertOne({ username, email, phone, role, password: hashedPassword });
+
+      res.status(201).json({ message: 'User created successfully' });
+    } catch (error) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+// Login API with validation
 
 
 mongoConnection.connect()
